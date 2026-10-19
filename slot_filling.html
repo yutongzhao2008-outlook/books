@@ -1,0 +1,558 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>槽位填充（Slot Filling）实现详解</title>
+<style>
+:root{--bg:#f5f7fb;--card:#fff;--ink:#1f2937;--muted:#6b7280;--brand:#4f46e5;--ok:#059669;--bad:#dc2626;--warn:#d97706;--line:#e5e7eb}
+*{box-sizing:border-box}
+body{margin:0;font-family:"Microsoft YaHei","PingFang SC",system-ui,sans-serif;background:var(--bg);color:var(--ink);line-height:1.7}
+header{background:linear-gradient(135deg,#4f46e5,#7c3aed);color:#fff;padding:40px 24px;text-align:center}
+header h1{margin:0 0 8px;font-size:30px}
+header p{margin:0;opacity:.9}
+main{max-width:1100px;margin:0 auto;padding:24px}
+section{background:var(--card);border-radius:14px;padding:24px;margin-bottom:24px;box-shadow:0 1px 3px rgba(0,0,0,.06)}
+h2{margin-top:0;font-size:22px;border-left:4px solid var(--brand);padding-left:10px}
+h3{font-size:16px;margin:16px 0 8px;color:var(--brand)}
+.muted{color:var(--muted);font-size:14px}
+.tag{display:inline-block;background:#eef2ff;color:var(--brand);border-radius:999px;padding:3px 12px;margin:3px;font-size:14px}
+.tag.miss{background:#fee2e2;color:var(--bad)}
+.steps{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px}
+.step{border:1px solid var(--line);border-radius:10px;padding:12px;cursor:pointer;background:#fff;transition:.2s}
+.step:hover,.step.on{border-color:var(--brand);box-shadow:0 0 0 3px #e0e7ff}
+.step b{display:block;color:var(--brand);font-size:13px}
+.detail{margin-top:14px;background:#eef2ff;border-radius:10px;padding:14px 18px;min-height:90px}
+.detail ul{margin:6px 0 0 18px;padding:0}
+.btn{border:0;background:var(--brand);color:#fff;padding:8px 16px;border-radius:8px;cursor:pointer;font-size:14px}
+.btn:hover{opacity:.9}
+.btn:disabled{background:#9ca3af;cursor:not-allowed}
+.btn.ghost{background:#fff;color:var(--brand);border:1px solid var(--brand)}
+.tabs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
+.pipe{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:16px}
+.pipe span{padding:4px 10px;border-radius:6px;background:#f3f4f6;color:var(--muted);font-size:13px;transition:.25s}
+.pipe span.lit{background:var(--brand);color:#fff}
+.pg{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+@media(max-width:800px){.pg{grid-template-columns:1fr}}
+.chat{border:1px solid var(--line);border-radius:10px;padding:12px;min-height:220px;max-height:340px;overflow:auto;background:#fafafa}
+.bub{max-width:85%;padding:8px 12px;border-radius:10px;margin:6px 0;font-size:14px;white-space:pre-wrap}
+.bub.user{background:var(--brand);color:#fff;margin-left:auto}
+.bub.bot{background:#fff;border:1px solid var(--line)}
+.row{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap}
+pre{background:#0f172a;color:#e2e8f0;padding:12px;border-radius:10px;font-size:13px;overflow:auto;white-space:pre-wrap;margin:0;min-height:60px}
+pre.code{white-space:pre}
+table{width:100%;border-collapse:collapse;font-size:14px}
+th,td{border-bottom:1px solid var(--line);padding:8px;text-align:left}
+th{color:var(--muted);font-weight:600}
+.badge{padding:2px 8px;border-radius:6px;font-size:12px;color:#fff}
+.b-ok{background:var(--ok)}.b-missing{background:var(--bad)}.b-invalid{background:var(--warn)}.b-optional{background:#9ca3af}
+.verdict{margin-top:12px;padding:10px 12px;border-radius:8px;background:#f9fafb;font-size:14px}
+.cmp{width:100%}
+.cmp td,.cmp th{font-size:14px}
+.check label{display:block;padding:6px 0;cursor:pointer}
+.codebar{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
+</style>
+</head>
+<body>
+<header>
+  <h1>槽位填充（Slot Filling）实现详解</h1>
+  <p>从自然语言中抽取结构化参数，并通过多轮追问补全缺失信息</p>
+</header>
+
+<main>
+<!-- 0. 生成说明 -->
+<section>
+  <h2>0 生成说明与原始 Prompt</h2>
+  <p class="muted">本页面由 Claude Code（Haiku 5.5）根据下面的用户请求生成。请求原文如下，未做改写。</p>
+  <pre>[1] ASD-STD100 make  an  interactivate HTML  explainer for "how to impelemtation slot filling, prompt and response save as slot_filling.html(中文）
+
+[2] slot_filling.html(中文）中漏了原始PROMPT</pre>
+  
+  <h3>生成过程</h3>
+  <ol><li>第 1 次请求：生成单文件 HTML，内容为槽位填充的概念、流程、交互演示（逐轮 Prompt 与 JSON 输出）和 Python 参考实现。</li><li>第 2 次请求指出原始 Prompt 缺失：从参考代码中的 build_messages() 实际运行生成 system / user 消息原文，写入第 ③ 节；交互演示中的 Prompt 也改为与之一致。</li><li>第 3 次请求：本节，补充生成说明与请求原文。</li><li>校验：对内嵌脚本做语法检查；未在浏览器中打开验证。</li></ol>
+</section>
+
+
+<!-- 1. 概念 -->
+<section>
+  <h2>① 什么是槽位填充</h2>
+  <p>槽位填充是任务型对话（Task-Oriented Dialogue）的核心环节。系统先识别用户<b>意图（Intent）</b>，再把句子中的关键信息抽取为<b>槽位（Slot）</b>，最后检查哪些必填槽位仍然为空，并向用户追问。</p>
+  <p class="muted">示例：用户说 <b>“帮我订明天从北京到上海的高铁票”</b></p>
+  <div>
+    <span class="tag">意图 = book_train</span>
+    <span class="tag">from = 北京</span>
+    <span class="tag">to = 上海</span>
+    <span class="tag">date = 2026-10-20</span>
+    <span class="tag miss">seat = 缺失 → 追问“一等座还是二等座？”</span>
+  </div>
+  <h3>传统方案 vs. LLM 方案</h3>
+  <table class="cmp">
+    <tr><th>维度</th><th>规则 / 序列标注（BIO + CRF）</th><th>LLM 抽取（Prompt + JSON）</th></tr>
+    <tr><td>需要标注数据</td><td>需要大量token级标注</td><td>几乎零样本，Schema 即可</td></tr>
+    <tr><td>新增槽位</td><td>重新标注、重新训练</td><td>修改 Schema 与 Prompt</td></tr>
+    <tr><td>口语/省略/指代</td><td>较弱</td><td>较强（可结合对话历史）</td></tr>
+    <tr><td>输出稳定性</td><td>确定</td><td>需要约束格式、校验与重试</td></tr>
+  </table>
+</section>
+
+<!-- 2. 流程 -->
+<section>
+  <h2>② 实现流程（点击查看每一步）</h2>
+  <div class="steps" id="steps"></div>
+  <div class="detail" id="stepDetail"></div>
+</section>
+
+<!-- 3. 原始 Prompt -->
+<section>
+  <h2>③ 原始 Prompt 与模型响应（完整文本）</h2>
+  <p class="muted">以下内容由参考实现中的 <code>build_messages()</code> 生成，未做删减，可直接作为 OpenAI 兼容接口的 <code>messages</code> 发送。第 1 轮是空的已知状态；第 2 轮把第 1 轮合并后的结果作为“已知状态”带入。</p>
+  <div class="note">说明：下方“模型响应”是按 Prompt 的约定写出的示例输出，与交互演示中的录制结果一致；真实输出取决于所用模型。</div>
+
+  <h3>第 1 轮：用户说“帮我订明天从北京到上海的高铁票”</h3>
+  <p class="muted">system 消息</p>
+  <pre>你是槽位抽取器。当前日期：2026-10-19。意图：book_train
+需要抽取的槽位：
+- from（出发城市）
+- to（到达城市）
+- date（出发日期，格式 YYYY-MM-DD）
+- seat（座位等级：一等座/二等座/商务座）
+规则：只输出 JSON 对象，键为槽位名；用户未提及的槽位填 null；与已知状态冲突时以最新输入为准；不要编造。</pre>
+  <p class="muted">user 消息</p>
+  <pre>已知状态：{}
+用户输入：帮我订明天从北京到上海的高铁票</pre>
+  <p class="muted">模型响应（content，示例输出）</p>
+  <pre>{"from": "北京", "to": "上海", "date": "2026-10-20", "seat": null}</pre>
+  <details><summary class="muted">查看完整请求体（发给接口的 JSON）</summary>
+  <pre>{
+  "model": "your-model",
+  "temperature": 0,
+  "response_format": {
+    "type": "json_object"
+  },
+  "messages": [
+    {
+      "role": "system",
+      "content": "你是槽位抽取器。当前日期：2026-10-19。意图：book_train\n需要抽取的槽位：\n- from（出发城市）\n- to（到达城市）\n- date（出发日期，格式 YYYY-MM-DD）\n- seat（座位等级：一等座/二等座/商务座）\n规则：只输出 JSON 对象，键为槽位名；用户未提及的槽位填 null；与已知状态冲突时以最新输入为准；不要编造。"
+    },
+    {
+      "role": "user",
+      "content": "已知状态：{}\n用户输入：帮我订明天从北京到上海的高铁票"
+    }
+  ]
+}</pre></details>
+
+  <h3>第 2 轮：用户说“二等座”</h3>
+  <p class="muted">system 消息</p>
+  <pre>你是槽位抽取器。当前日期：2026-10-19。意图：book_train
+需要抽取的槽位：
+- from（出发城市）
+- to（到达城市）
+- date（出发日期，格式 YYYY-MM-DD）
+- seat（座位等级：一等座/二等座/商务座）
+规则：只输出 JSON 对象，键为槽位名；用户未提及的槽位填 null；与已知状态冲突时以最新输入为准；不要编造。</pre>
+  <p class="muted">user 消息</p>
+  <pre>已知状态：{"from": "北京", "to": "上海", "date": "2026-10-20"}
+用户输入：二等座</pre>
+  <p class="muted">模型响应（content，示例输出）</p>
+  <pre>{"from": null, "to": null, "date": null, "seat": "二等座"}</pre>
+  <details><summary class="muted">查看完整请求体（发给接口的 JSON）</summary>
+  <pre>{
+  "model": "your-model",
+  "temperature": 0,
+  "response_format": {
+    "type": "json_object"
+  },
+  "messages": [
+    {
+      "role": "system",
+      "content": "你是槽位抽取器。当前日期：2026-10-19。意图：book_train\n需要抽取的槽位：\n- from（出发城市）\n- to（到达城市）\n- date（出发日期，格式 YYYY-MM-DD）\n- seat（座位等级：一等座/二等座/商务座）\n规则：只输出 JSON 对象，键为槽位名；用户未提及的槽位填 null；与已知状态冲突时以最新输入为准；不要编造。"
+    },
+    {
+      "role": "user",
+      "content": "已知状态：{\"from\": \"北京\", \"to\": \"上海\", \"date\": \"2026-10-20\"}\n用户输入：二等座"
+    }
+  ]
+}</pre></details>
+</section>
+
+<!-- 4. 交互演示 -->
+<section>
+  <h2>④ 交互演示：逐轮执行槽位填充</h2>
+  <p class="muted">选择场景，点击发送。右侧会显示真实发给模型的 Prompt、模型返回的 JSON，以及合并、校验后的槽位状态。<br>注：模型输出为预先录制的示例结果，便于离线演示。</p>
+  <div class="tabs" id="tabs"></div>
+  <div class="pipe" id="pipe"></div>
+  <div class="pg">
+    <div>
+      <h3>对话</h3>
+      <div class="chat" id="chat"></div>
+      <div class="row">
+        <button class="btn" id="sendBtn"></button>
+        <button class="btn ghost" id="resetBtn">重置对话</button>
+      </div>
+    </div>
+    <div>
+      <h3 id="promptTitle">发送给模型的 Prompt</h3>
+      <pre id="promptPane"></pre>
+      <h3>模型输出（JSON）</h3>
+      <pre id="respPane"></pre>
+    </div>
+  </div>
+  <h3>槽位状态（合并 + 校验后）</h3>
+  <table>
+    <thead><tr><th>槽位</th><th>含义</th><th>当前值</th><th>状态</th></tr></thead>
+    <tbody id="slotBody"></tbody>
+  </table>
+  <div class="verdict" id="verdict"></div>
+</section>
+
+<!-- 4. 代码 -->
+<section>
+  <h2>⑤ 参考实现（Python）</h2>
+  <div class="codebar">
+    <span class="muted">基于 OpenAI 兼容接口，可替换为任意支持 JSON 输出的模型服务</span>
+    <button class="btn ghost" id="copyBtn">复制代码</button>
+  </div>
+<pre class="code" id="code"><code>import json
+import re
+from openai import OpenAI
+
+client = OpenAI()            # 任何兼容 OpenAI 接口的模型服务都可以
+TODAY = "2026-10-19"
+
+SCHEMA = {
+    "intent": "book_train",
+    "slots": {
+        "from": {"desc": "出发城市", "required": True, "ask": "请问从哪个城市出发？"},
+        "to":   {"desc": "到达城市", "required": True, "ask": "请问要到哪个城市？"},
+        "date": {"desc": "出发日期，格式 YYYY-MM-DD", "required": True,
+                 "ask": "请问哪天出发？", "pattern": r"^\d{4}-\d{2}-\d{2}$"},
+        "seat": {"desc": "座位等级：一等座/二等座/商务座", "required": True,
+                 "ask": "请问您要一等座、二等座还是商务座？",
+                 "enum": ["一等座", "二等座", "商务座"]},
+    },
+}
+
+def build_messages(utterance, state):
+    """步骤②：构造 Prompt（指令 + Schema + 已知状态 + 用户输入）"""
+    slot_lines = "\n".join(
+        f"- {name}（{cfg['desc']}）" for name, cfg in SCHEMA["slots"].items()
+    )
+    system = (
+        f"你是槽位抽取器。当前日期：{TODAY}。意图：{SCHEMA['intent']}\n"
+        f"需要抽取的槽位：\n{slot_lines}\n"
+        "规则：只输出 JSON 对象，键为槽位名；用户未提及的槽位填 null；"
+        "与已知状态冲突时以最新输入为准；不要编造。"
+    )
+    user = f"已知状态：{json.dumps(state, ensure_ascii=False)}\n用户输入：{utterance}"
+    return [{"role": "system", "content": system},
+            {"role": "user", "content": user}]
+
+def call_llm(utterance, state, retries=1):
+    """步骤③④：调用模型，强制 JSON 输出，解析失败则重试"""
+    for _ in range(retries + 1):
+        resp = client.chat.completions.create(
+            model="your-model",
+            messages=build_messages(utterance, state),
+            temperature=0,                                # 抽取任务要确定性
+            response_format={"type": "json_object"},      # 约束输出为 JSON
+        )
+        try:
+            return json.loads(resp.choices[0].message.content)
+        except json.JSONDecodeError:
+            continue
+    return {}
+
+def merge(state, new_slots):
+    """步骤⑥：合并状态，null 不覆盖已有值"""
+    for key, value in new_slots.items():
+        if value is not None:
+            state[key] = value
+    return state
+
+def validate(state):
+    """步骤⑤：代码侧校验，不完全相信模型输出"""
+    errors = {}
+    for name, cfg in SCHEMA["slots"].items():
+        value = state.get(name)
+        if value in (None, ""):
+            if cfg["required"]:
+                errors[name] = "缺失"
+        elif "enum" in cfg and value not in cfg["enum"]:
+            errors[name] = "取值不合法"
+        elif "pattern" in cfg and not re.match(cfg["pattern"], str(value)):
+            errors[name] = "格式不正确"
+    return errors
+
+def run_turn(utterance, state):
+    """一轮对话：抽取 → 合并 → 校验 → 追问或执行"""
+    state = merge(state, call_llm(utterance, state))
+    errors = validate(state)
+    if not errors:
+        return state, "已为您提交订单。"
+    first_missing = next(iter(errors))
+    return state, SCHEMA["slots"][first_missing]["ask"]
+
+if __name__ == "__main__":
+    state = {}
+    for text in ["帮我订明天从北京到上海的高铁票", "二等座"]:
+        state, reply = run_turn(text, state)
+        print("用户:", text)
+        print("状态:", state)
+        print("助手:", reply)
+</code></pre>
+</section>
+
+<!-- 5. 注意事项 -->
+<section>
+  <h2>⑥ 常见问题与最佳实践</h2>
+  <div class="check">
+    <label><input type="checkbox"> 用 <code>response_format</code> 或约束解码保证输出是合法 JSON，并设置 <code>temperature=0</code></label>
+    <label><input type="checkbox"> 相对时间（明天、后天、下周一）由代码提供当前日期，或先用解析器归一化为 YYYY-MM-DD</label>
+    <label><input type="checkbox"> 合并状态时 <code>null</code> 不覆盖已有槽位；用户改口时以最新值为准</label>
+    <label><input type="checkbox"> 校验放在代码里（枚举、正则、业务范围如人数 ≤ 10），不要只相信模型</label>
+    <label><input type="checkbox"> 对缺失或不合法的槽位只追问一个，减少用户负担</label>
+    <label><input type="checkbox"> 用户切换意图时清空旧意图的槽位，避免串台</label>
+    <label><input type="checkbox"> 对话状态按 session 持久化，并设置超时或“取消”指令来重置</label>
+    <label><input type="checkbox"> 可要求模型返回原文片段作为依据，降低幻觉（如 <code>"evidence": {"from": "北京"}</code>）</label>
+    <label><input type="checkbox"> 建立标注集，用<b>槽位级 F1</b>与<b>整句完全匹配率</b>评估，每次改 Prompt 后回归测试</label>
+  </div>
+</section>
+
+</main>
+
+<script>
+const TODAY = '2026-10-19';
+
+const SCENARIOS = [
+  {
+    name: '订火车票', intent: 'book_train',
+    schema: [
+      { key: 'from', desc: '出发城市', required: true, ask: '请问从哪个城市出发？' },
+      { key: 'to', desc: '到达城市', required: true, ask: '请问要到哪个城市？' },
+      { key: 'date', desc: '出发日期，格式 YYYY-MM-DD', required: true, ask: '请问哪天出发？',
+        check: v => /^\d{4}-\d{2}-\d{2}$/.test(v), msg: '日期格式应为 YYYY-MM-DD' },
+      { key: 'seat', desc: '座位等级：一等座/二等座/商务座', required: true, ask: '请问您要一等座、二等座还是商务座？',
+        enum: ['一等座', '二等座', '商务座'] }
+    ],
+    turns: [
+      { user: '帮我订明天从北京到上海的高铁票', out: { from: '北京', to: '上海', date: '2026-10-20', seat: null } },
+      { user: '二等座', out: { from: null, to: null, date: null, seat: '二等座' } }
+    ],
+    done: s => `已为您提交从${s.from}到${s.to}、${s.date}的${s.seat}订单（模拟）。`
+  },
+  {
+    name: '查天气', intent: 'query_weather',
+    schema: [
+      { key: 'city', desc: '城市', required: true, ask: '请问想查询哪个城市？' },
+      { key: 'date', desc: '日期，格式 YYYY-MM-DD，未提及则为今天', required: false, ask: '',
+        check: v => /^\d{4}-\d{2}-\d{2}$/.test(v), msg: '日期格式应为 YYYY-MM-DD' }
+    ],
+    turns: [
+      { user: '上海天气怎么样', out: { city: '上海', date: null } },
+      { user: '那后天呢', out: { city: null, date: '2026-10-21' } }
+    ],
+    done: s => `正在查询${s.city}${s.date ? ' ' + s.date : '今天'}的天气（模拟）。`
+  },
+  {
+    name: '订会议室', intent: 'book_room',
+    schema: [
+      { key: 'time', desc: '开始时间，格式 HH:MM', required: true, ask: '请问几点开始？',
+        check: v => /^([01]\d|2[0-3]):[0-5]\d$/.test(v), msg: '时间格式应为 HH:MM' },
+      { key: 'people', desc: '参会人数（1-10）', required: true, ask: '请问参会人数是多少？',
+        check: v => Number(v) >= 1 && Number(v) <= 10, msg: '会议室最多容纳 10 人' }
+    ],
+    turns: [
+      { user: '帮我订明天下午3点的会议室，一共15个人', out: { time: '15:00', people: 15 } },
+      { user: '那就改成8个人', out: { time: null, people: 8 } }
+    ],
+    done: s => `已为您预订 ${s.time} 的会议室，${s.people} 人（模拟）。`
+  }
+];
+
+const STEPS = [
+  { title: '1 定义 Schema', body: '明确意图名称，列出每个槽位的名称、含义、类型、是否必填、枚举取值。Schema 既是 Prompt 的一部分，也是代码校验的依据。' },
+  { title: '2 构造 Prompt', body: '系统指令（角色、输出格式、规则）+ Schema 列表 + 当前日期 + 已知槽位状态 + 最新用户输入。已知状态让模型能理解“那后天呢”这类省略表达。' },
+  { title: '3 调用 LLM', body: 'temperature 设为 0 保证稳定；通过 response_format 或约束解码强制返回 JSON；只抽取，不做对话生成。' },
+  { title: '4 解析与容错', body: 'json.loads 解析；失败则重试一次或走修复逻辑；字段缺失时补 null，确保后续逻辑不会因 KeyError 崩溃。' },
+  { title: '5 校验', body: '按 Schema 检查枚举、正则、业务范围（如人数 ≤ 10）。模型输出只是候选值，校验通过才算有效。' },
+  { title: '6 合并、追问或执行', body: '非 null 的新值覆盖旧状态；仍有缺失或不合法槽位时只追问一个；全部满足后调用业务接口执行。' }
+];
+
+let sc = 0, ti = 0, state = {}, log = [], lastOut = null, lastPrompt = '';
+
+function validate(schema, st) {
+  return schema.map(f => {
+    const v = st[f.key];
+    if (v == null || v === '') {
+      return { ...f, status: f.required ? 'missing' : 'optional' };
+    }
+    if (f.enum && !f.enum.includes(v)) {
+      return { ...f, status: 'invalid', msg: '应为 ' + f.enum.join(' / ') };
+    }
+    if (f.check && !f.check(v)) {
+      return { ...f, status: 'invalid', msg: f.msg || '取值不合法' };
+    }
+    return { ...f, status: 'ok' };
+  });
+}
+
+function merge(st, out) {
+  const next = { ...st };
+  for (const k in out) {
+    if (out[k] != null) next[k] = out[k];
+  }
+  return next;
+}
+
+function buildPrompt(scn, st, utterance) {
+  const slotLines = scn.schema.map(f => `- ${f.key}（${f.desc}）`).join('\n');
+  const known = '{' + Object.entries(st).map(([k, v]) => `"${k}": ${JSON.stringify(v)}`).join(', ') + '}';
+  return `[system]
+你是槽位抽取器。当前日期：${TODAY}。意图：${scn.intent}
+需要抽取的槽位：
+${slotLines}
+规则：只输出 JSON 对象，键为槽位名；用户未提及的槽位填 null；与已知状态冲突时以最新输入为准；不要编造。
+
+[user]
+已知状态：${known}
+用户输入：${utterance}`;
+}
+
+const STATUS_LABEL = { ok: '已填', missing: '缺失', invalid: '不合法', optional: '可选未填' };
+
+function renderSteps() {
+  const box = document.getElementById('steps');
+  box.innerHTML = '';
+  STEPS.forEach((s, i) => {
+    const d = document.createElement('div');
+    d.className = 'step' + (i === 0 ? ' on' : '');
+    d.innerHTML = `<b>${s.title}</b>`;
+    d.onclick = () => {
+      document.querySelectorAll('.step').forEach(x => x.classList.remove('on'));
+      d.classList.add('on');
+      document.getElementById('stepDetail').textContent = s.body;
+    };
+    box.appendChild(d);
+  });
+  document.getElementById('stepDetail').textContent = STEPS[0].body;
+}
+
+function renderTabs() {
+  const box = document.getElementById('tabs');
+  box.innerHTML = '';
+  SCENARIOS.forEach((s, i) => {
+    const b = document.createElement('button');
+    b.className = 'btn' + (i === sc ? '' : ' ghost');
+    b.textContent = s.name;
+    b.onclick = () => { sc = i; reset(); };
+    box.appendChild(b);
+  });
+}
+
+function renderPipe() {
+  const labels = ['Schema', 'Prompt', 'LLM', '解析', '校验', '合并/追问'];
+  document.getElementById('pipe').innerHTML = labels.map(l => `<span>${l}</span>`).join('');
+}
+
+function flashPipeline() {
+  const spans = document.querySelectorAll('#pipe span');
+  spans.forEach((s, i) => setTimeout(() => s.classList.add('lit'), i * 180));
+  spans.forEach((s, i) => setTimeout(() => s.classList.remove('lit'), 6 * 180 + i * 0 + 400));
+}
+
+function render() {
+  const scn = SCENARIOS[sc];
+  const pending = scn.turns[ti];
+
+  // 对话
+  const chat = document.getElementById('chat');
+  chat.innerHTML = log.map(m =>
+    `<div class="bub ${m.role}">${m.text}</div>`).join('') ||
+    '<div class="muted">（对话尚未开始）</div>';
+  chat.scrollTop = chat.scrollHeight;
+
+  // 按钮
+  const btn = document.getElementById('sendBtn');
+  btn.disabled = !pending;
+  btn.textContent = pending ? `发送：“${pending.user}”` : '对话已结束';
+
+  // Prompt 与模型输出
+  document.getElementById('promptTitle').textContent = pending
+    ? '发送给模型的 Prompt（预览）' : '发送给模型的 Prompt';
+  document.getElementById('promptPane').textContent = pending
+    ? buildPrompt(scn, state, pending.user) : lastPrompt;
+  document.getElementById('respPane').textContent = lastOut
+    ? JSON.stringify(lastOut, null, 2) : '（尚未发送）';
+
+  // 槽位表
+  const rows = validate(scn.schema, state);
+  document.getElementById('slotBody').innerHTML = rows.map(r => {
+    const v = state[r.key] == null ? '—' : String(state[r.key]);
+    return `<tr>
+      <td><code>${r.key}</code></td>
+      <td>${r.desc}</td>
+      <td>${v}</td>
+      <td><span class="badge b-${r.status}">${STATUS_LABEL[r.status]}</span>
+          ${r.msg ? `<span class="muted">${r.msg}</span>` : ''}</td>
+    </tr>`;
+  }).join('');
+
+  const bad = rows.filter(r => r.status === 'missing' || r.status === 'invalid');
+  const verdict = document.getElementById('verdict');
+  if (log.length === 0) {
+    verdict.textContent = '尚未开始。';
+  } else if (bad.length) {
+    verdict.textContent = `⚠️ 仍需补充：${bad.map(r => r.desc).join('、')}（下一步会追问，不执行业务动作）`;
+  } else {
+    verdict.textContent = '✅ 必填槽位全部满足，可以调用业务接口执行。';
+  }
+}
+
+function send() {
+  const scn = SCENARIOS[sc];
+  const turn = scn.turns[ti];
+  if (!turn) return;
+
+  flashPipeline();
+  lastPrompt = buildPrompt(scn, state, turn.user);   // 发送前的 Prompt 使用旧状态
+  lastOut = turn.out;
+  log.push({ role: 'user', text: turn.user });
+
+  state = merge(state, turn.out);                     // 合并
+  const rows = validate(scn.schema, state);           // 校验
+  const bad = rows.filter(r => r.status === 'missing' || r.status === 'invalid');
+
+  let reply;
+  if (bad.length) {
+    const f = bad[0];
+    reply = (f.status === 'invalid' ? f.msg + '，' : '') + f.ask;   // 只追问第一个问题
+  } else {
+    reply = scn.done(state);
+  }
+  log.push({ role: 'bot', text: reply });
+  ti++;
+  render();
+}
+
+function reset() {
+  ti = 0; state = {}; log = []; lastOut = null; lastPrompt = '';
+  renderTabs();
+  render();
+}
+
+document.getElementById('sendBtn').onclick = send;
+document.getElementById('resetBtn').onclick = reset;
+document.getElementById('copyBtn').onclick = () => {
+  const text = document.querySelector('#code code').textContent;
+  navigator.clipboard.writeText(text).then(() => {
+    document.getElementById('copyBtn').textContent = '已复制 ✓';
+    setTimeout(() => document.getElementById('copyBtn').textContent = '复制代码', 1500);
+  });
+};
+
+renderSteps();
+renderPipe();
+reset();
+</script>
+</body>
+</html>

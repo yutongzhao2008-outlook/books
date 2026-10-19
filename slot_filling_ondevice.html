@@ -1,0 +1,538 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>端侧槽位填充（Slot Filling on Android）实现详解</title>
+<style>
+:root{--bg:#f5f7fb;--card:#fff;--ink:#1f2937;--muted:#6b7280;--brand:#4f46e5;--ok:#059669;--bad:#dc2626;--warn:#d97706;--line:#e5e7eb}
+*{box-sizing:border-box}
+body{margin:0;font-family:"Microsoft YaHei","PingFang SC",system-ui,sans-serif;background:var(--bg);color:var(--ink);line-height:1.7}
+header{background:linear-gradient(135deg,#0f766e,#4f46e5);color:#fff;padding:40px 24px;text-align:center}
+header h1{margin:0 0 8px;font-size:30px}
+header p{margin:0;opacity:.92}
+main{max-width:1100px;margin:0 auto;padding:24px}
+section{background:var(--card);border-radius:14px;padding:24px;margin-bottom:24px;box-shadow:0 1px 3px rgba(0,0,0,.06)}
+h2{margin-top:0;font-size:22px;border-left:4px solid var(--brand);padding-left:10px}
+h3{font-size:16px;margin:16px 0 8px;color:var(--brand)}
+.muted{color:var(--muted);font-size:14px}
+.tag{display:inline-block;background:#eef2ff;color:var(--brand);border-radius:999px;padding:3px 12px;margin:3px;font-size:14px}
+.tag.ok{background:#d1fae5;color:var(--ok)}
+.tag.bad{background:#fee2e2;color:var(--bad)}
+.note{background:#fffbeb;border-left:4px solid var(--warn);padding:10px 14px;border-radius:8px;font-size:14px;margin:12px 0}
+.grid3{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px}
+.card{border:1px solid var(--line);border-radius:10px;padding:14px;background:#fff}
+.card b{color:var(--brand)}
+.flow{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:12px 0}
+.flow .box{border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-size:14px;background:#f9fafb}
+.flow .box.dev{background:#ecfdf5;border-color:#6ee7b7}
+.flow .arrow{color:var(--muted)}
+table{width:100%;border-collapse:collapse;font-size:14px}
+th,td{border-bottom:1px solid var(--line);padding:8px;text-align:left;vertical-align:top}
+th{color:var(--muted);font-weight:600}
+.btn{border:0;background:var(--brand);color:#fff;padding:8px 16px;border-radius:8px;cursor:pointer;font-size:14px}
+.btn:disabled{background:#9ca3af;cursor:not-allowed}
+.btn.ghost{background:#fff;color:var(--brand);border:1px solid var(--brand)}
+.btn.ghost.on{background:var(--brand);color:#fff}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:10px 0}
+pre{background:#0f172a;color:#e2e8f0;padding:12px;border-radius:10px;font-size:13px;overflow:auto;white-space:pre-wrap;margin:0}
+pre.code{white-space:pre}
+.dec{font-family:Consolas,"Microsoft YaHei",monospace;font-size:16px;background:#0f172a;color:#e2e8f0;padding:14px;border-radius:10px;min-height:56px;word-break:break-all}
+.dec .cur{background:#facc15;color:#0f172a;border-radius:3px;padding:0 2px}
+.allow{margin-top:10px;padding:10px 14px;background:#eef2ff;border-radius:8px;font-size:14px}
+.badge{padding:2px 8px;border-radius:6px;font-size:12px;color:#fff}
+.b-ok{background:var(--ok)}.b-bad{background:var(--bad)}.b-warn{background:var(--warn)}
+.tabs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
+.pg{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+@media(max-width:800px){.pg{grid-template-columns:1fr}}
+.check label{display:block;padding:6px 0;cursor:pointer}
+.codebar{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;gap:8px;flex-wrap:wrap}
+</style>
+</head>
+<body>
+<header>
+  <h1>端侧槽位填充（Slot Filling on Android）实现详解</h1>
+  <p>小模型 · 本地推理 · 约束解码 · 不依赖云端</p>
+</header>
+
+<main>
+<!-- 0. 生成说明 -->
+<section>
+  <h2>0 生成说明与原始 Prompt</h2>
+  <p class="muted">本页面由 Claude Code（Haiku 5.5）根据下面的用户请求生成。请求原文如下，未做改写。</p>
+  <pre>[1] 添加： ASD-STD100 make  an  interactivate HTML  explainer for "how to open source impelemtation slot filling on device/android (small and not cloud side), prompt and response save as slot_filling.html(中文）
+
+[2] 这些才是原始PROMPT， 需要添加，让人知道我是如何生成这个HTML==</pre>
+  <div class="note">文件名说明：请求中的文件名为 slot_filling.html。由于同名文件已是云端版本，本页保存为 slot_filling_ondevice.html，避免覆盖。</div>
+  <h3>生成过程</h3>
+  <ol><li>检索本地仓库：阅读 android_agent/LORA_CONTRAINED_DECODER 与 端侧推理 下的资料，确认团队在 Android 上使用 llama.cpp / llama-server 与 GGUF 模型。</li><li>核对 llama-server 的 grammar、json_schema、cache_prompt 等参数（依据仓库内 evidence/llama-server-README.md）。</li><li>尝试在线核对 LiteRT-LM 的 Android API，但网络受限，未能确认，因此代码只使用 llama-server 路线。</li><li>生成单文件 HTML：约束解码逐 token 演示、Prompt 与响应查看器、Kotlin 调用示例、检查清单。</li><li>校验：对内嵌脚本做语法检查；未在浏览器中打开验证，Kotlin 代码未编译。</li></ol>
+</section>
+
+
+<!-- 1 -->
+<section>
+  <h2>① 为什么要做端侧槽位填充</h2>
+  <div class="grid3">
+    <div class="card"><b>隐私</b><br>语音、住址、银行卡相关的话语不离开手机。</div>
+    <div class="card"><b>延迟</b><br>不经过网络往返，本地即可出结果；网络差也能用。</div>
+    <div class="card"><b>离线</b><br>地铁、飞行模式、弱网场景下仍可工作。</div>
+    <div class="card"><b>成本</b><br>没有按 token 计费，也没有服务端并发压力。</div>
+  </div>
+  <div class="note">代价是：内存、算力、模型能力都受限。端侧通常只能跑 0.5B–2B 级别的小模型，它们<b>不会可靠地遵循长指令</b>。所以端侧方案的关键不是“写更长的 Prompt”，而是<b>让解码过程本身受约束</b>，再由代码兜底校验。</div>
+</section>
+
+<!-- 2 -->
+<section>
+  <h2>② 三条开源路线</h2>
+  <table>
+    <tr><th>路线</th><th>做法</th><th>优点</th><th>代价</th><th>适合</th></tr>
+    <tr>
+      <td><b>A. 小 LLM + 约束解码</b><br><span class="tag ok">推荐</span></td>
+      <td>GGUF 量化模型（如 Qwen2.5-0.5B/1.5B-Instruct、Gemma 3 1B、SmolLM2）+ llama.cpp，通过 <code>json_schema</code> / GBNF 语法约束输出</td>
+      <td>一个模型覆盖多槽位、改 Schema 即可扩展；能处理口语、省略表达</td>
+      <td>占用内存较多；需要做量化与基准测试</td>
+      <td>通用任务型对话，中高端机型</td>
+    </tr>
+    <tr>
+      <td><b>B. 小型 NLU 模型</b></td>
+      <td>BERT 类意图分类 + 序列标注（BIO）模型，导出为 ONNX / TFLite 在端侧运行</td>
+      <td>体积小、延迟低、结果确定</td>
+      <td>需要标注数据；新增槽位要重新训练</td>
+      <td>槽位固定、数据充足、低内存设备</td>
+    </tr>
+    <tr>
+      <td><b>C. 规则 + 词典</b></td>
+      <td>正则、日期解析、城市/车站词典、数字归一化</td>
+      <td>零模型、完全可解释</td>
+      <td>覆盖率有限，口语变体难处理</td>
+      <td>兜底、日期/数字归一化、低端机</td>
+    </tr>
+  </table>
+  <h3>按设备预算选路线（点选查看建议）</h3>
+  <div class="row" id="budgetBtns"></div>
+  <div class="allow" id="budgetOut"></div>
+  <p class="muted">模型体积与内存为量级估算，实际取决于量化方式、上下文长度与设备，请以实测为准。</p>
+</section>
+
+<!-- 3 -->
+<section>
+  <h2>③ 推荐架构：规则预处理 + 约束抽取 + 代码校验</h2>
+  <div class="flow">
+    <div class="box">语音识别 / 文本输入</div><span class="arrow">→</span>
+    <div class="box dev">规则归一化<br><span class="muted">“明天”→2026-10-20</span></div><span class="arrow">→</span>
+    <div class="box dev">短 Prompt<br><span class="muted">固定前缀 + 已知状态</span></div><span class="arrow">→</span>
+    <div class="box dev">llama-server<br><span class="muted">127.0.0.1，json_schema 约束</span></div><span class="arrow">→</span>
+    <div class="box dev">解析 + 校验</div><span class="arrow">→</span>
+    <div class="box dev">合并状态</div><span class="arrow">→</span>
+    <div class="box">追问 / 本地执行</div>
+  </div>
+  <p class="muted">绿色为端侧组件。全程在手机上完成，没有云端调用。</p>
+  <div class="note">与仓库已有工作的关系：<code>android_agent/app</code> 已经用 <code>llama-server</code> 在设备本地运行 GGUF 模型；<code>LORA_CONTRAINED_DECODER</code> 研究了“同一基座 + 多个 LoRA + 按请求绑定 JSON Schema”的做法，可用于不同业务域的槽位集合。</div>
+</section>
+
+<!-- 4 -->
+<section>
+  <h2>④ 交互演示：约束解码逐 token 执行</h2>
+  <p class="muted">目标输出：<code>{"from":"北京","to":"上海","date":"2026-10-20","seat":"二等座"}</code>。每一步会显示：当前已生成的文本、下一段允许的内容，以及语法约束的含义。可以切换“无约束”对比。</p>
+  <div class="row">
+    <button class="btn ghost on" id="modeC">约束解码（json_schema）</button>
+    <button class="btn ghost" id="modeR">无约束（普通采样）</button>
+    <button class="btn" id="nextBtn">下一步</button>
+    <button class="btn ghost" id="playBtn">自动播放</button>
+    <button class="btn ghost" id="resetDec">重置</button>
+  </div>
+  <div class="dec" id="decOut"></div>
+  <div class="allow" id="decRule"></div>
+  <h3>代码侧校验结果</h3>
+  <table>
+    <thead><tr><th>槽位</th><th>值</th><th>状态</th></tr></thead>
+    <tbody id="decCheck"></tbody>
+  </table>
+  <p class="muted" id="decSummary"></p>
+</section>
+
+<!-- 5 -->
+<section>
+  <h2>⑤ Prompt 与模型响应（端侧版）</h2>
+  <p class="muted">端侧模型上下文短、能力有限，Prompt 要<b>更短、更固定</b>：一句话指令、一个示例、当前日期、已知状态、用户输入。固定部分放在最前面，便于 llama-server 复用 KV cache（<code>cache_prompt</code>）。</p>
+  <div class="row" id="turnBtns"></div>
+  <div class="pg">
+    <div>
+      <h3>请求体（POST /completion）</h3>
+      <pre id="reqPane"></pre>
+    </div>
+    <div>
+      <h3>Prompt 正文</h3>
+      <pre id="promptPane"></pre>
+      <h3>响应（content 字段解析后）</h3>
+      <pre id="respPane"></pre>
+    </div>
+  </div>
+  <h3>合并后的状态</h3>
+  <table>
+    <thead><tr><th>槽位</th><th>值</th><th>状态</th></tr></thead>
+    <tbody id="stateBody"></tbody>
+  </table>
+</section>
+
+<!-- 6 -->
+<section>
+  <h2>⑥ 实现步骤</h2>
+  <h3>第一步：准备模型</h3>
+  <ol>
+    <li>选择小模型（如 Qwen2.5-0.5B/1.5B-Instruct），在可信环境中转换为 GGUF 并做量化（如 Q4_K_M）。</li>
+    <li>在电脑上用真实的槽位语料评估：槽位级 F1、整句完全匹配率、首 token 延迟。</li>
+    <li>把模型文件放到应用私有目录或随 APK 分发（注意 APK 体积限制，大模型建议首次启动时下载或由用户导入）。</li>
+  </ol>
+  <h3>第二步：在设备上启动 llama-server</h3>
+  <pre id="startCmd" class="code"></pre>
+  <h3>第三步：Schema 与约束</h3>
+  <p class="muted">Schema 同时用于约束解码和代码校验。约束保证“结构和枚举”正确，代码校验保证“业务含义”正确（例如日期是否真实存在、人数是否超过上限）。</p>
+  <h3>第四步：Android 端调用（Kotlin）</h3>
+  <div class="codebar">
+    <span class="muted">HTTP 调用在后台线程执行（withContext(Dispatchers.IO)），不要阻塞主线程。</span>
+    <button class="btn ghost" data-copy="kt-src">复制代码</button>
+  </div>
+  <pre class="code" id="kt-out"></pre>
+  <h3>第五步：多轮对话与追问</h3>
+  <p class="muted">状态只保存非空值；缺失的槽位只追问第一个；全部满足后在本地执行业务动作。用户切换意图时清空旧槽位。</p>
+</section>
+
+<!-- 7 -->
+<section>
+  <h2>⑦ 常见问题与检查清单</h2>
+  <div class="check">
+    <label><input type="checkbox"> 量化前后用同一评测集对比，确认槽位准确率下降在可接受范围</label>
+    <label><input type="checkbox"> 上下文长度设得尽量小（如 512–1024），并限制 n_predict，避免生成超长文本</label>
+    <label><input type="checkbox"> 固定前缀放最前面，开启 cache_prompt，减少每轮的 prefill 时间</label>
+    <label><input type="checkbox"> 温度设为 0，抽取任务要求结果确定</label>
+    <label><input type="checkbox"> 日期、数字、时间用规则先归一化，不要让小模型做日期运算（“后天”→2026-10-21）</label>
+    <label><input type="checkbox"> 若同时开启工具调用与 JSON 约束，要单独测试：仓库的 “Constraint Tax” 研究表明两者叠加会压制工具调用</label>
+    <label><input type="checkbox"> llama.cpp 版本固定，并核对所用版本对 <code>json_schema</code> 中 <code>null</code>、枚举、<code>pattern</code> 的支持范围（可对照 <code>evidence/llama-json-schema-to-grammar.cpp</code>）</label>
+    <label><input type="checkbox"> 本地服务只监听 127.0.0.1，不对外暴露端口</label>
+    <label><input type="checkbox"> 日志中不记录原始语音/用户输入，或做脱敏</label>
+    <label><input type="checkbox"> 在低端机与中端机上分别测首 token 延迟和峰值内存，超出预算时降级到路线 B 或 C</label>
+  </div>
+</section>
+
+</main>
+
+<!-- ============ 源码（纯文本，避免 HTML 转义） ============ -->
+<script type="text/plain" id="kt-src">import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import org.json.JSONObject
+import java.net.HttpURLConnection
+import java.net.URL
+
+private val SLOTS = listOf("from", "to", "date", "seat")
+private val SEATS = listOf("一等座", "二等座", "商务座")
+
+// 与 llama-server 的 json_schema 一致：约束解码保证结构与枚举
+private val SLOT_SCHEMA = JSONObject("""
+{
+  "type": "object",
+  "properties": {
+    "from": {"type": ["string", "null"]},
+    "to":   {"type": ["string", "null"]},
+    "date": {"type": ["string", "null"]},
+    "seat": {"enum": ["一等座", "二等座", "商务座", null]}
+  },
+  "required": ["from", "to", "date", "seat"],
+  "additionalProperties": false
+}
+""".trimIndent())
+
+class OnDeviceSlotFiller(
+    private val baseUrl: String = "http://127.0.0.1:8080",
+    private val today: String = "2026-10-19",
+) {
+    private val state = mutableMapOf<String, String>()   // 只保存非空槽位
+
+    /** 一轮对话，必须在后台线程或 suspend 上下文中调用 */
+    suspend fun turn(utterance: String): Map<String, String> = withContext(Dispatchers.IO) {
+        val out = complete(buildPrompt(utterance))
+        merge(out)
+        state.toMap()
+    }
+
+    fun missing(): List<String> = SLOTS.filter { it !in state }
+
+    private fun buildPrompt(utterance: String): String = """
+        从用户话语中抽取槽位，只输出 JSON。今天是 $today。
+        示例：用户：明天从深圳去广州 → {"from":"深圳","to":"广州","date":"2026-10-20","seat":null}
+        已知：${JSONObject(state)}
+        用户：$utterance
+        输出：
+    """.trimIndent()
+
+    private fun complete(prompt: String): JSONObject {
+        val body = JSONObject()
+            .put("prompt", prompt)
+            .put("n_predict", 64)
+            .put("temperature", 0.0)
+            .put("cache_prompt", true)            // 复用固定前缀的 KV cache
+            .put("json_schema", SLOT_SCHEMA)
+        val conn = URL("$baseUrl/completion").openConnection() as HttpURLConnection
+        conn.requestMethod = "POST"
+        conn.doOutput = true
+        conn.setRequestProperty("Content-Type", "application/json")
+        conn.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
+        val content = JSONObject(conn.inputStream.bufferedReader().use { it.readText() })
+            .getString("content")
+        return JSONObject(content)
+    }
+
+    private fun merge(out: JSONObject) {
+        for (key in SLOTS) {
+            if (out.isNull(key)) continue          // null 不覆盖已有值
+            val value = out.getString(key)
+            if (key == "seat" && value !in SEATS) continue   // 代码侧二次校验
+            state[key] = value
+        }
+    }
+}
+</script>
+
+<script type="text/plain" id="kt-usage">// ViewModel 中（协程作用域内）
+val filler = OnDeviceSlotFiller()
+
+val slots = filler.turn("帮我订明天从北京到上海的高铁票")
+// slots = {from=北京, to=上海, date=2026-10-20}
+
+val next = filler.missing().firstOrNull()
+if (next == "seat") {
+    ask("请问您要一等座、二等座还是商务座？")
+}
+
+val slots2 = filler.turn("二等座")
+// slots2 = {from=北京, to=上海, date=2026-10-20, seat=二等座}
+if (filler.missing().isEmpty()) if (filler.missing().isEmpty()) submitOrder(slots2)   // 本地执行，不上云
+</script>
+
+<script>
+const $ = id => document.getElementById(id);
+const SEATS = ['一等座', '二等座', '商务座'];
+const SLOT_KEYS = ['from', 'to', 'date', 'seat'];
+const TODAY = '2026-10-19';
+
+/* ---------- ② 设备预算 → 路线建议 ---------- */
+const BUDGET = {
+  low: { label: '低内存（约 1 GB 以下可用）',
+         text: '推荐路线 B + C：BERT 类 NLU 模型或规则 + 词典。小型 GGUF 模型体积可能仍偏大，低端机上首 token 延迟也可能较高，需先实测。' },
+  mid: { label: '中等（约 2–4 GB 可用内存）',
+         text: '推荐路线 A：Qwen2.5-0.5B-Instruct 等同级小模型（Q4 量化），上下文 512–1024，json_schema 约束；日期与数字仍由规则归一化。' },
+  high: { label: '较高（约 6 GB 以上，中高端机）',
+          text: '推荐路线 A：Qwen2.5-1.5B-Instruct 或 Gemma 3 1B 级模型；如有多个业务域，可按请求挂载不同 LoRA，每个 LoRA 绑定一套 Schema；保留规则兜底。' }
+};
+const budgetBtns = $('budgetBtns');
+Object.entries(BUDGET).forEach(([key, b], i) => {
+  const btn = document.createElement('button');
+  btn.className = 'btn ghost' + (i === 1 ? ' on' : '');
+  btn.textContent = b.label;
+  btn.onclick = () => {
+    document.querySelectorAll('#budgetBtns .btn').forEach(x => x.classList.remove('on'));
+    btn.classList.add('on');
+    $('budgetOut').textContent = b.text;
+  };
+  budgetBtns.appendChild(btn);
+});
+$('budgetOut').textContent = BUDGET.mid.text;
+
+/* ---------- ④ 约束解码逐 token 演示 ---------- */
+const STEPS_CONSTRAINED = [
+  ['{', '对象开始：语法只允许 {'],
+  ['"from":', '键只能是 from / to / date / seat 之一'],
+  ['"北京"', 'from 的值：字符串或 null'],
+  [',"to":', '逗号之后只能是剩余的键 to / date / seat'],
+  ['"上海"', 'to 的值：字符串或 null'],
+  [',"date":', '剩余的键只有 date / seat'],
+  ['"2026-10-20"', 'date 的值：字符串（格式由代码校验，也可在 Schema 中加 pattern）'],
+  [',"seat":', '剩余的键只有 seat'],
+  ['"二等座"', 'seat 只能取枚举：一等座 | 二等座 | 商务座 | null'],
+  ['}', '语法结束，停止生成']
+];
+const STEPS_RAW = [
+  ['{"from": "北京", "to": "上海", ', '无约束：模型自由生成，格式不保证'],
+  ['"date": "明天", ', '相对日期被原样输出，需要规则归一化'],
+  ['"seat": "二等", ', '枚举之外的值，语义也不完整'],
+  ['"note": "已为您预订"}', '多余字段，不在 Schema 中']
+];
+
+let mode = 'constrained', steps = STEPS_CONSTRAINED, idx = 0, timer = null;
+
+function checkRows(obj) {
+  const rows = [];
+  SLOT_KEYS.forEach(k => {
+    const v = obj[k];
+    let status = 'ok', msg = '';
+    if (v == null) { status = 'null'; msg = '未填（null）'; }
+    else if (k === 'seat' && !SEATS.includes(v)) { status = 'bad'; msg = '不在枚举中'; }
+    else if (k === 'date' && !/^\d{4}-\d{2}-\d{2}$/.test(v)) { status = 'bad'; msg = '格式应为 YYYY-MM-DD'; }
+    rows.push({ k, v, status, msg });
+  });
+  Object.keys(obj).forEach(k => {
+    if (!SLOT_KEYS.includes(k)) rows.push({ k, v: obj[k], status: 'bad', msg: '多余字段' });
+  });
+  return rows;
+}
+
+const BADGE = { ok: ['b-ok', '通过'], bad: ['b-bad', '失败'], null: ['b-warn', '未填'] };
+
+function renderDecode() {
+  const out = $('decOut');
+  out.innerHTML = '';
+  if (idx === 0) out.textContent = '（尚未开始，点击“下一步”）';
+  steps.slice(0, idx).forEach((s, i) => {
+    const sp = document.createElement('span');
+    sp.textContent = s[0];
+    if (i === idx - 1) sp.className = 'cur';
+    out.appendChild(sp);
+  });
+  $('decRule').textContent = idx < steps.length
+    ? '下一段需满足：' + steps[idx][1]
+    : '生成结束。';
+  $('nextBtn').disabled = idx >= steps.length;
+
+  const tbody = $('decCheck');
+  tbody.innerHTML = '';
+  if (idx < steps.length) {
+    $('decSummary').textContent = '生成尚未结束，暂不校验。';
+    return;
+  }
+  const text = steps.map(s => s[0]).join('');
+  let rows, summary;
+  try {
+    rows = checkRows(JSON.parse(text));
+    const bad = rows.some(r => r.status === 'bad');
+    summary = bad
+      ? '❌ 校验失败：不要直接执行。可用同一 Prompt 重试一次，或走规则兜底，并对错误的槽位追问。'
+      : '✅ 结构、枚举、格式均通过，可以进入合并与执行。';
+  } catch (e) {
+    rows = [{ k: '(整体)', v: '', status: 'bad', msg: '非法 JSON' }];
+    summary = '❌ 无法解析为 JSON，需要重试。';
+  }
+  rows.forEach(r => {
+    const [cls, label] = BADGE[r.status === 'bad' ? 'bad' : (r.status === 'null' ? 'null' : 'ok')];
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td><code>${r.k}</code></td>
+      <td>${r.v == null ? '—' : String(r.v)}</td>
+      <td><span class="badge ${cls}">${label}</span> <span class="muted">${r.msg}</span></td>`;
+    tbody.appendChild(tr);
+  });
+  $('decSummary').textContent = summary;
+}
+
+function setMode(m) {
+  mode = m;
+  steps = m === 'constrained' ? STEPS_CONSTRAINED : STEPS_RAW;
+  $('modeC').classList.toggle('on', m === 'constrained');
+  $('modeR').classList.toggle('on', m === 'raw');
+  resetDecode();
+}
+
+function stopTimer() { if (timer) { clearInterval(timer); timer = null; $('playBtn').textContent = '自动播放'; } }
+
+function resetDecode() {
+  stopTimer();
+  idx = 0;
+  renderDecode();
+}
+
+function nextStep() {
+  if (idx < steps.length) { idx++; renderDecode(); }
+  if (idx >= steps.length) stopTimer();
+}
+
+$('modeC').onclick = () => setMode('constrained');
+$('modeR').onclick = () => setMode('raw');
+$('nextBtn').onclick = () => { stopTimer(); nextStep(); };
+$('resetDec').onclick = resetDecode;
+$('playBtn').onclick = () => {
+  if (timer) { stopTimer(); return; }
+  if (idx >= steps.length) resetDecode();
+  $('playBtn').textContent = '暂停';
+  timer = setInterval(nextStep, 800);
+};
+
+/* ---------- ⑤ Prompt 与响应 ---------- */
+const SCHEMA = {
+  type: 'object',
+  properties: {
+    from: { type: ['string', 'null'] },
+    to: { type: ['string', 'null'] },
+    date: { type: ['string', 'null'] },
+    seat: { enum: ['一等座', '二等座', '商务座', null] }
+  },
+  required: SLOT_KEYS,
+  additionalProperties: false
+};
+
+const TURNS = [
+  { label: '第 1 轮：订票', known: {}, utter: '帮我订明天从北京到上海的高铁票',
+    resp: { from: '北京', to: '上海', date: '2026-10-20', seat: null } },
+  { label: '第 2 轮：补充座位', known: { from: '北京', to: '上海', date: '2026-10-20' }, utter: '二等座',
+    resp: { from: null, to: null, date: null, seat: '二等座' } }
+];
+
+function buildPrompt(known, utter) {
+  return `从用户话语中抽取槽位，只输出 JSON。今天是 ${TODAY}。
+示例：用户：明天从深圳去广州 → {"from":"深圳","to":"广州","date":"2026-10-20","seat":null}
+已知：${JSON.stringify(known)}
+用户：${utter}
+输出：`;
+}
+
+let turnIdx = 0;
+function renderTurn() {
+  const t = TURNS[turnIdx];
+  const prompt = buildPrompt(t.known, t.utter);
+  const body = { prompt, n_predict: 64, temperature: 0, cache_prompt: true, json_schema: SCHEMA };
+  $('reqPane').textContent = JSON.stringify(body, null, 2);
+  $('promptPane').textContent = prompt;
+  $('respPane').textContent = JSON.stringify(t.resp, null, 2);
+
+  // 合并到当前状态：只保存非空值，seat 不在枚举内则丢弃
+  const state = {};
+  TURNS.slice(0, turnIdx + 1).forEach(x => {
+    Object.entries(x.resp).forEach(([k, v]) => {
+      if (v == null) return;
+      if (k === 'seat' && !SEATS.includes(v)) return;
+      state[k] = v;
+    });
+  });
+  $('stateBody').innerHTML = SLOT_KEYS.map(k => {
+    const has = k in state;
+    return `<tr><td><code>${k}</code></td><td>${has ? state[k] : '—'}</td>
+      <td><span class="badge ${has ? 'b-ok' : 'b-warn'}">${has ? '已填' : '缺失'}</span></td></tr>`;
+  }).join('');
+
+  $('turnBtns').innerHTML = '';
+  TURNS.forEach((x, i) => {
+    const b = document.createElement('button');
+    b.className = 'btn ghost' + (i === turnIdx ? ' on' : '');
+    b.textContent = x.label;
+    b.onclick = () => { turnIdx = i; renderTurn(); };
+    $('turnBtns').appendChild(b);
+  });
+}
+
+/* ---------- ⑥ 实现步骤 ---------- */
+$('startCmd').textContent =
+`llama-server -m <应用私有目录>/models/qwen2.5-0.5b-instruct-q4_k_m.gguf \\
+  --host 127.0.0.1 --port 8080 -c 1024 -np 1`;
+$('kt-out').textContent = $('kt-src').textContent + '\n\n// ---- 调用示例 ----\n' + $('kt-usage').textContent;
+
+document.querySelectorAll('[data-copy]').forEach(btn => {
+  btn.onclick = () => {
+    navigator.clipboard.writeText($('kt-out').textContent).then(() => {
+      btn.textContent = '已复制 ✓';
+      setTimeout(() => btn.textContent = '复制代码', 1500);
+    });
+  };
+});
+
+setMode('constrained');
+renderTurn();
+</script>
+</body>
+</html>

@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>如何在手机上优化端侧槽位填充 - 交互讲解</title>
+<style>
+  :root { --brand:#4f46e5; --ok:#059669; --bad:#dc2626; --warn:#d97706; --ink:#1f2937; --muted:#6b7280; --line:#e5e7eb; --bg:#f5f7fb; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family:"Microsoft YaHei","PingFang SC",system-ui,sans-serif; background:var(--bg); color:var(--ink); line-height:1.7; }
+  header { background:linear-gradient(135deg,#0f766e,#4f46e5); color:#fff; padding:32px 24px; text-align:center; }
+  header h1 { margin:0 0 6px; font-size:26px; }
+  header p { margin:0; opacity:.9; }
+  main { max-width:1000px; margin:0 auto; padding:24px; }
+  section { background:#fff; border-radius:14px; padding:22px; margin-bottom:22px; box-shadow:0 1px 3px rgba(0,0,0,.06); }
+  h2 { margin:0 0 10px; font-size:20px; border-left:4px solid var(--brand); padding-left:10px; }
+  .muted { color:var(--muted); font-size:14px; }
+  .grid { display:grid; grid-template-columns:1fr 1fr; gap:18px; }
+  @media (max-width:760px) { .grid { grid-template-columns:1fr; } }
+  label.ctl { display:block; font-size:14px; margin:12px 0 4px; }
+  label.ctl span.val { float:right; color:var(--brand); font-weight:600; }
+  input[type=range] { width:100%; }
+  .toggle { display:flex; align-items:center; gap:8px; margin:12px 0; font-size:14px; }
+  select { width:100%; padding:6px; border-radius:6px; border:1px solid var(--line); font-size:14px; }
+  .bar { height:18px; border-radius:9px; background:#e5e7eb; overflow:hidden; margin:4px 0 10px; }
+  .bar > div { height:100%; background:var(--brand); transition:width .3s; }
+  .bar.bad > div { background:var(--bad); }
+  .bar.ok > div { background:var(--ok); }
+  .stat { font-size:28px; font-weight:700; }
+  .stat small { font-size:14px; color:var(--muted); font-weight:400; }
+  .tip { background:#fffbeb; border-left:4px solid var(--warn); padding:10px 14px; border-radius:8px; font-size:14px; margin-top:12px; }
+  .good { background:#ecfdf5; border-left:4px solid var(--ok); }
+  table { width:100%; border-collapse:collapse; font-size:14px; }
+  th, td { border-bottom:1px solid var(--line); padding:8px; text-align:left; vertical-align:top; }
+  th { color:var(--muted); font-weight:600; }
+  .step { display:flex; gap:12px; margin:10px 0; }
+  .num { flex:0 0 28px; height:28px; border-radius:50%; background:var(--brand); color:#fff; display:flex; align-items:center; justify-content:center; font-size:14px; }
+  .btn { border:0; background:var(--brand); color:#fff; padding:8px 14px; border-radius:8px; cursor:pointer; font-size:14px; }
+  .btn.ghost { background:#fff; color:var(--brand); border:1px solid var(--brand); }
+  .check label { display:block; padding:5px 0; font-size:14px; cursor:pointer; }
+</style>
+</head>
+<body>
+<header>
+  <h1>如何在手机上优化端侧槽位填充</h1>
+  <p>调节参数，观察延迟与内存的变化；所有数值均为示意估算，请以真机实测为准。</p>
+</header>
+
+<main>
+
+<section>
+  <h2>一、优化的三类成本</h2>
+  <p class="muted">一次槽位抽取的耗时，主要来自三件事：读取 Prompt（prefill）、生成输出（decode）、加载模型（启动时一次）。</p>
+  <div class="grid">
+    <div class="card"><b>读 Prompt</b><br>固定前缀 + 用户输入。开启 cache_prompt 后，固定前缀不再重复计算。</div>
+    <div class="card"><b>写输出</b><br>输出是一小段 JSON。设置 n_predict=64，JSON 闭合即停止。</div>
+    <div class="card"><b>加载模型</b><br>只在应用启动时做一次。让 llama-server 常驻，不要每次请求重新加载。</div>
+  </div>
+</section>
+
+<section>
+  <h2>二、交互调参</h2>
+  <p class="muted">拖动滑块或切换选项，下方的估算结果会实时更新。</p>
+  <div class="grid">
+    <div>
+      <label class="ctl">模型大小 <span class="val" id="pVal"></span></label>
+      <input type="range" id="params" min="0" max="3" step="1" value="0">
+
+      <label class="ctl">量化方式</label>
+      <select id="quant">
+        <option value="f16">F16（不量化）</option>
+        <option value="q8">Q8_0</option>
+        <option value="q4" selected>Q4_K_M（推荐）</option>
+      </select>
+
+      <label class="ctl">上下文长度 <span class="val" id="ctxVal"></span></label>
+      <input type="range" id="ctx" min="0" max="3" step="1" value="1">
+
+      <label class="ctl">CPU 线程数 <span class="val" id="thVal"></span></label>
+      <input type="range" id="threads" min="1" max="8" step="1" value="4">
+
+      <label class="ctl">单次最大输出 token（n_predict）<span class="val" id="npVal"></span></label>
+      <input type="range" id="np" min="16" max="128" step="16" value="64">
+
+      <div class="toggle"><input type="checkbox" id="cache" checked> <label for="cache">开启 cache_prompt（固定前缀复用）</label></div>
+    </div>
+
+    <div>
+      <div class="muted">估算内存占用</div>
+      <div class="stat" id="memOut"></div>
+      <div class="bar" id="memBar"><div></div></div>
+
+      <div class="muted">估算首 token 延迟（prefill）</div>
+      <div class="stat" id="ttftOut"></div>
+
+      <div class="muted">估算总延迟（一轮抽取）</div>
+      <div class="stat" id="totOut"></div>
+      <div class="bar" id="totBar"><div></div></div>
+    </div>
+  </div>
+  <div class="tip" id="advice"></div>
+</section>
+
+<section>
+  <h2>三、请求为什么这样设计</h2>
+  <p class="muted">下面的 Prompt 按“固定部分在前”组织，才能让 cache_prompt 生效。</p>
+  <table>
+    <tr><th>部分</th><th>内容</th><th>是否每轮变化</th></tr>
+    <tr><td>固定前缀</td><td>一句话指令、一个示例、输出格式</td><td>否（可被缓存）</td></tr>
+    <tr><td>当前状态</td><td>已知槽位 JSON</td><td>是</td></tr>
+    <tr><td>用户输入</td><td>本轮的话</td><td>是</td></tr>
+  </table>
+  <p class="muted">如果在前缀里放入当前日期或时间，缓存就会失效。日期应当由代码在输出后归一化，或者放在最后。</p>
+</section>
+
+<section>
+  <h2>四、优化步骤（按顺序做，每次只改一项）</h2>
+  <div class="step"><div class="num">1</div><div>把模型换成 0.5B 或 1.5B，并使用 Q4_K_M 量化。</div></div>
+  <div class="step"><div class="num">2</div><div>把固定指令放在 Prompt 最前面，开启 cache_prompt。</div></div>
+  <div class="step"><div class="num">3</div><div>设置 n_predict=64，temperature=0。</div></div>
+  <div class="step"><div class="num">4</div><div>上下文设为 512–1024，不要使用默认的大上下文。</div></div>
+  <div class="step"><div class="num">5</div><div>应用启动时运行一次 llama-server，并保持常驻。</div></div>
+  <div class="step"><div class="num">6</div><div>用 2 / 4 / 6 线程分别测试，选择最快且不过热的配置。</div></div>
+  <div class="step"><div class="num">7</div><div>日期、数字在代码中先归一化，模型只负责抽取。</div></div>
+  <div class="step"><div class="num">8</div><div>每改一项，都用同一测试集复测准确率；下降就撤销。</div></div>
+</section>
+
+<section>
+  <h2>五、上线前检查清单</h2>
+  <div class="check">
+    <label><input type="checkbox"> 首 token 延迟在目标机型上达到预期</label>
+    <label><input type="checkbox"> 峰值内存在低端机上不会被系统杀掉</label>
+    <label><input type="checkbox"> 连续使用 5 分钟后，延迟没有明显上升（未过热降频）</label>
+    <label><input type="checkbox"> 量化前后槽位准确率的差距在可接受范围内</label>
+    <label><input type="checkbox"> 固定前缀未被修改，cache_prompt 确实命中</label>
+    <label><input type="checkbox"> 服务只监听 127.0.0.1，日志中不记录原始语音</label>
+  </div>
+</section>
+
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+
+// 示意参数：模型参数量（B）、每参数字节数（随量化变化）、层数、基础吞吐（tok/s，4 线程、0.5B、Q4 基准）
+const MODELS = [
+  { name: '0.5B', b: 0.5, layers: 24 },
+  { name: '1.0B', b: 1.0, layers: 28 },
+  { name: '1.5B', b: 1.5, layers: 28 },
+  { name: '3B',   b: 3.0, layers: 36 }
+];
+const QUANT = {
+  f16: { bytes: 2.0,  speed: 0.5 },
+  q8:  { bytes: 1.06, speed: 0.8 },
+  q4:  { bytes: 0.6,  speed: 1.0 }
+};
+const CTX = [256, 512, 1024, 2048];
+const DEVICE_RAM_MB = 4096;      // 示意：中端机可供应用使用的内存
+const PREFIX_TOK = 120;          // 固定前缀约 120 token
+const USER_TOK = 30;             // 用户输入 + 已知状态约 30 token
+const OUT_TOK = 30;              // 实际 JSON 输出约 30 token（上限由 n_predict 决定）
+
+function estimate() {
+  const m = MODELS[+$('params').value];
+  const q = QUANT[$('quant').value];
+  const ctx = CTX[+$('ctx').value];
+  const th = +$('threads').value;
+  const np = +$('np').value;
+  const cache = $('cache').checked;
+
+  // 内存：权重 + KV cache（随上下文与层数增长）
+  const weightsMB = m.b * 1024 * q.bytes;
+  const kvMB = ctx * m.layers * 0.02;
+  const memMB = weightsMB + kvMB;
+
+  // 速度：参数越少越快；线程数有收益递减（超过 4 收益很小，示意）
+  const threadFactor = Math.min(th, 4) + Math.max(0, th - 4) * 0.3;
+  const speed = (threadFactor / 4) * q.speed * (1.5 / m.b) * 40; // tok/s 量级
+  const prefillTok = cache ? USER_TOK : PREFIX_TOK + USER_TOK;
+  const ttftMs = (prefillTok / (speed * 4)) * 1000;             // prefill 速度约为 decode 的 4 倍（示意）
+  const outTok = Math.min(OUT_TOK, np);
+  const totMs = ttftMs + (outTok / speed) * 1000;
+
+  return { m, q, ctx, th, np, cache, memMB, ttftMs, totMs, outTok, speed };
+}
+
+function render() {
+  const e = estimate();
+  $('pVal').textContent = e.m.name;
+  $('ctxVal').textContent = e.ctx + ' token';
+  $('thVal').textContent = e.th + ' 线程';
+  $('npVal').textContent = e.np;
+
+  const memPct = Math.min(100, e.memMB / DEVICE_RAM_MB * 100);
+  $('memOut').innerHTML = Math.round(e.memMB) + ' <small>MB</small>';
+  $('memBar').className = 'bar ' + (memPct > 60 ? 'bad' : 'ok');
+  $('memBar').firstElementChild.style.width = memPct + '%';
+
+  $('ttftOut').innerHTML = Math.round(e.ttftMs) + ' <small>ms</small>';
+
+  const totPct = Math.min(100, e.totMs / 1500 * 100);  // 1.5 秒作为满格参考
+  $('totOut').innerHTML = Math.round(e.totMs) + ' <small>ms</small>';
+  $('totBar').className = 'bar ' + (e.totMs < 800 ? 'ok' : (e.totMs > 1200 ? 'bad' : ''));
+  $('totBar').firstElementChild.style.width = totPct + '%';
+
+  const tips = [];
+  if (e.m.b >= 3) tips.push('3B 模型在多数中端机上内存偏紧，建议改用 0.5B–1.5B。');
+  if ($('quant').value === 'f16') tips.push('F16 体积大，建议使用 Q4_K_M。');
+  if (!e.cache) tips.push('未开启 cache_prompt：每轮都要重新计算固定前缀，首 token 变慢。');
+  if (e.ctx >= 2048) tips.push('上下文过长会增加内存占用，槽位任务 512–1024 通常已足够。');
+  if (e.th > 4) tips.push('线程超过 4 后收益很小，且更容易发热降频，请实测确认。');
+  if (e.np > 64) tips.push('JSON 输出一般不超过 64 token，n_predict 设得更大只增加风险。');
+  if (tips.length === 0) {
+    $('advice').className = 'tip good';
+    $('advice').textContent = '当前配置较均衡。请在真机上测量首 token、峰值内存与发热后的延迟，并用测试集复核准确率。';
+  } else {
+    $('advice').className = 'tip';
+    $('advice').textContent = '建议：' + tips.join(' ');
+  }
+}
+
+document.querySelectorAll('input, select').forEach(el => el.addEventListener('input', render));
+document.querySelectorAll('input[type=checkbox]').forEach(el => el.addEventListener('change', render));
+render();
+</script>
+</body>
+</html>
